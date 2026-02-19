@@ -14,6 +14,7 @@ type TabType = 'messages' | 'tools';
 
 export function RequestDetail({ request, getMessage, getTool }: RequestDetailProps) {
   const [activeTab, setActiveTab] = useState<TabType>('messages');
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
   const requestMessages = request.request_messages
     .map(id => getMessage(id))
@@ -24,6 +25,10 @@ export function RequestDetail({ request, getMessage, getTool }: RequestDetailPro
   const tools = request.tools
     .map(id => getTool(id))
     .filter((t): t is Tool => t !== undefined);
+
+  const handleToggleExpand = (messageId: string) => {
+    setExpandedMessageId(prev => prev === messageId ? null : messageId);
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -76,7 +81,7 @@ export function RequestDetail({ request, getMessage, getTool }: RequestDetailPro
         </div>
 
         {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-6" style={{ paddingBottom: 0 }}>
           {activeTab === 'messages' ? (
             <div className="space-y-3">
               {requestMessages.length === 0 ? (
@@ -85,7 +90,12 @@ export function RequestDetail({ request, getMessage, getTool }: RequestDetailPro
                 </div>
               ) : (
                 requestMessages.map((message) => (
-                  <MessageCard key={message.id} message={message} />
+                  <MessageCard
+                    key={message.id}
+                    message={message}
+                    isExpanded={expandedMessageId === message.id}
+                    onToggleExpand={() => handleToggleExpand(message.id)}
+                  />
                 ))
               )}
             </div>
@@ -103,6 +113,7 @@ export function RequestDetail({ request, getMessage, getTool }: RequestDetailPro
             </div>
           )}
         </div>
+
       </div>
 
       {/* Response Section */}
@@ -114,7 +125,11 @@ export function RequestDetail({ request, getMessage, getTool }: RequestDetailPro
         </div>
         <div className="p-6 bg-bg-secondary max-h-80 overflow-y-auto">
           {responseMessage ? (
-            <MessageCard message={responseMessage} />
+            <MessageCard
+              message={responseMessage}
+              isExpanded={expandedMessageId === responseMessage.id}
+              onToggleExpand={() => handleToggleExpand(responseMessage.id)}
+            />
           ) : (
             <div className="text-center text-text-muted py-4">
               No response message

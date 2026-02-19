@@ -1,54 +1,59 @@
-import { useState, useMemo } from 'react';
 import type { Message } from '../../types';
 
 interface MessageCardProps {
   message: Message;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
 }
 
-const MAX_LINES = 5;
+export const MESSAGE_MAX_LINES = 5;
 const LINE_HEIGHT = 1.5; // matches leading-relaxed
 
-const roleConfig: Record<Message['role'], { label: string; colorClass: string; bgClass: string }> = {
+export function getMessageLineCount(message: Message): number {
+  if (!message.content) return 0;
+  return message.content.split('\n').length;
+}
+
+const roleConfig: Record<Message['role'], { label: string; colorClass: string; bgClass: string; bgSolidClass: string }> = {
   system: {
     label: 'system',
     colorClass: 'text-role-system',
     bgClass: 'bg-role-system/10 border-role-system/30',
+    bgSolidClass: 'bg-[color-mix(in_srgb,var(--color-role-system)_10%,var(--color-bg-primary))]',
   },
   user: {
     label: 'user',
     colorClass: 'text-role-user',
     bgClass: 'bg-role-user/10 border-role-user/30',
+    bgSolidClass: 'bg-[color-mix(in_srgb,var(--color-role-user)_10%,var(--color-bg-primary))]',
   },
   assistant: {
     label: 'assistant',
     colorClass: 'text-role-assistant',
     bgClass: 'bg-role-assistant/10 border-role-assistant/30',
+    bgSolidClass: 'bg-[color-mix(in_srgb,var(--color-role-assistant)_10%,var(--color-bg-primary))]',
   },
   tool_use: {
     label: 'tool_use',
     colorClass: 'text-role-tool-use',
     bgClass: 'bg-role-tool-use/10 border-role-tool-use/30',
+    bgSolidClass: 'bg-[color-mix(in_srgb,var(--color-role-tool-use)_10%,var(--color-bg-primary))]',
   },
   tool_result: {
     label: 'tool_result',
     colorClass: 'text-role-tool-result',
     bgClass: 'bg-role-tool-result/10 border-role-tool-result/30',
+    bgSolidClass: 'bg-[color-mix(in_srgb,var(--color-role-tool-result)_10%,var(--color-bg-primary))]',
   },
 };
 
-export function MessageCard({ message }: MessageCardProps) {
+export function MessageCard({ message, isExpanded = false, onToggleExpand }: MessageCardProps) {
   const config = roleConfig[message.role];
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const contentLineCount = useMemo(() => {
-    if (!message.content) return 0;
-    return message.content.split('\n').length;
-  }, [message.content]);
-
-  const shouldTruncate = contentLineCount > MAX_LINES;
+  const contentLineCount = getMessageLineCount(message);
+  const shouldTruncate = contentLineCount > MESSAGE_MAX_LINES;
 
   return (
-    <div className={`rounded-lg border ${config.bgClass} overflow-hidden`}>
+    <div className={`rounded-lg border ${config.bgClass}`}>
       {/* Header */}
       <div className="px-4 py-2 border-b border-inherit flex items-center gap-2">
         <span className={`text-xs font-mono font-medium uppercase ${config.colorClass}`}>
@@ -67,7 +72,7 @@ export function MessageCard({ message }: MessageCardProps) {
               style={
                 shouldTruncate && !isExpanded
                   ? {
-                      maxHeight: `${MAX_LINES * LINE_HEIGHT}em`,
+                      maxHeight: `${MESSAGE_MAX_LINES * LINE_HEIGHT}em`,
                       maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
                       WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
                     }
@@ -76,12 +81,12 @@ export function MessageCard({ message }: MessageCardProps) {
             >
               {message.content}
             </div>
-            {shouldTruncate && (
+            {shouldTruncate && !isExpanded && onToggleExpand && (
               <button
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={onToggleExpand}
                 className="mt-1 text-xs font-medium text-text-muted hover:text-text-primary transition-colors"
               >
-                {isExpanded ? '收起' : `展开 (${contentLineCount} 行)`}
+                展开 ({contentLineCount} 行)
               </button>
             )}
           </div>
@@ -108,6 +113,18 @@ export function MessageCard({ message }: MessageCardProps) {
           </div>
         )}
       </div>
+
+      {/* Sticky collapse button when expanded */}
+      {shouldTruncate && isExpanded && onToggleExpand && (
+        <div className={`sticky bottom-0 px-4 py-2 border-t border-inherit rounded-b-lg ${config.bgSolidClass}`}>
+          <button
+            onClick={onToggleExpand}
+            className="text-xs font-medium text-text-muted hover:text-text-primary transition-colors"
+          >
+            收起
+          </button>
+        </div>
+      )}
     </div>
   );
 }
