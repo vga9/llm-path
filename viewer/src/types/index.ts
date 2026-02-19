@@ -33,3 +33,14 @@ export interface TraceData {
   tools: Tool[];
   requests: Request[];
 }
+
+export interface DiffItem {
+  type: 'unchanged' | 'added' | 'deleted' | 'modified';
+  oldMessage?: Message;  // unchanged/deleted/modified
+  newMessage?: Message;  // unchanged/added/modified
+}
+
+export interface DiffResult {
+  items: DiffItem[];
+  summary: { unchanged: number; added: number; deleted: number; modified: number };
+}

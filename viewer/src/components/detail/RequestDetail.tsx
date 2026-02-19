@@ -3,18 +3,29 @@ import type { Request, Message, Tool } from '../../types';
 import { RequestHeader } from './RequestHeader';
 import { MessageCard } from './MessageCard';
 import { ToolCard } from './ToolCard';
+import { DiffView } from '../diff/DiffView';
+import { useDiff } from '../../hooks/useDiff';
 
 interface RequestDetailProps {
   request: Request;
   getMessage: (id: string) => Message | undefined;
   getTool: (id: string) => Tool | undefined;
+  getRequest: (id: string) => Request | undefined;
 }
 
 type TabType = 'messages' | 'tools';
 
-export function RequestDetail({ request, getMessage, getTool }: RequestDetailProps) {
+export function RequestDetail({ request, getMessage, getTool, getRequest }: RequestDetailProps) {
   const [activeTab, setActiveTab] = useState<TabType>('messages');
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+
+  const parentRequest = request.parent_id ? getRequest(request.parent_id) ?? null : null;
+
+  const { diff } = useDiff({
+    currentRequest: request,
+    parentRequest,
+    getMessage,
+  });
 
   const requestMessages = request.request_messages
     .map(id => getMessage(id))
@@ -83,22 +94,11 @@ export function RequestDetail({ request, getMessage, getTool }: RequestDetailPro
         {/* Tab Content */}
         <div className="flex-1 overflow-y-auto p-6" style={{ paddingBottom: 0 }}>
           {activeTab === 'messages' ? (
-            <div className="space-y-3">
-              {requestMessages.length === 0 ? (
-                <div className="text-center text-text-muted py-8">
-                  No messages in this request
-                </div>
-              ) : (
-                requestMessages.map((message) => (
-                  <MessageCard
-                    key={message.id}
-                    message={message}
-                    isExpanded={expandedMessageId === message.id}
-                    onToggleExpand={() => handleToggleExpand(message.id)}
-                  />
-                ))
-              )}
-            </div>
+            <DiffView
+              diff={diff}
+              expandedMessageId={expandedMessageId}
+              onToggleExpand={handleToggleExpand}
+            />
           ) : (
             <div className="space-y-3">
               {tools.length === 0 ? (

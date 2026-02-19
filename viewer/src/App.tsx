@@ -72,6 +72,7 @@ function App() {
             request={selectedRequest}
             getMessage={getMessage}
             getTool={getTool}
+            getRequest={getRequest}
           />
         ) : (
           <div className="h-full flex items-center justify-center">
