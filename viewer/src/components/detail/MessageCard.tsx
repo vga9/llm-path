@@ -66,7 +66,11 @@ export function MessageCard({ message }: MessageCardProps) {
               }`}
               style={
                 shouldTruncate && !isExpanded
-                  ? { maxHeight: `${MAX_LINES * LINE_HEIGHT}em` }
+                  ? {
+                      maxHeight: `${MAX_LINES * LINE_HEIGHT}em`,
+                      maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                      WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                    }
                   : undefined
               }
             >
@@ -75,7 +79,7 @@ export function MessageCard({ message }: MessageCardProps) {
             {shouldTruncate && (
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="mt-2 text-xs font-medium text-text-muted hover:text-text-primary transition-colors"
+                className="mt-1 text-xs font-medium text-text-muted hover:text-text-primary transition-colors"
               >
                 {isExpanded ? '收起' : `展开 (${contentLineCount} 行)`}
               </button>
