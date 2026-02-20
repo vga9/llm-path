@@ -185,16 +185,56 @@ class TraceCooker:
         return tool_id
 
     def _process_request_messages(self, messages: list[dict]) -> list[str]:
-        """Process request messages and return list of message IDs."""
+        """Process request messages and return list of message IDs.
+
+        Handles content that can be either a string or an array.
+        When content is an array, each element is expanded into a separate message.
+        """
         msg_ids = []
         for msg in messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
             tool_calls = msg.get("tool_calls")
 
-            msg_id = self._get_or_create_message(role, content, tool_calls)
-            msg_ids.append(msg_id)
+            # Handle content as array - expand into multiple messages
+            if isinstance(content, list):
+                for item in content:
+                    item_content = self._extract_content_from_item(item)
+                    msg_id = self._get_or_create_message(role, item_content, None)
+                    msg_ids.append(msg_id)
+                # If there are tool_calls, add a separate message for them
+                if tool_calls:
+                    msg_id = self._get_or_create_message(role, "", tool_calls)
+                    msg_ids.append(msg_id)
+            else:
+                msg_id = self._get_or_create_message(role, content, tool_calls)
+                msg_ids.append(msg_id)
         return msg_ids
+
+    def _extract_content_from_item(self, item: str | dict) -> str:
+        """Extract content string from a content array item.
+
+        Handles both plain strings and structured content objects like:
+        - {"type": "text", "text": "..."}
+        - {"type": "image_url", "image_url": {"url": "..."}}
+        """
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            # Text content block
+            if item.get("type") == "text":
+                return item.get("text", "")
+            # Image URL content block
+            if item.get("type") == "image_url":
+                image_url = item.get("image_url", {})
+                url = image_url.get("url", "") if isinstance(image_url, dict) else str(image_url)
+                # Truncate base64 data URLs for display
+                if url.startswith("data:"):
+                    return "[image: base64 data]"
+                return f"[image: {url}]"
+            # Other types - serialize as JSON
+            return json.dumps(item, ensure_ascii=False)
+        return str(item)
 
     def _process_response_message(self, response: dict | None, error: str | None) -> str:
         """Process response and return message ID."""
