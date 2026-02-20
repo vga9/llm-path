@@ -273,10 +273,9 @@ function GraphRow({ node, svgWidth, isSelected, onClick }: GraphRowProps) {
         style={{
           display: 'flex',
           flexDirection: 'column',
-          flex: 1,
           paddingLeft: 8,
           paddingRight: 12,
-          minWidth: 0,
+          minWidth: 160,
           gap: 2,
         }}
       >

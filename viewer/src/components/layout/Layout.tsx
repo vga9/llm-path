@@ -9,7 +9,7 @@ export function Layout({ sidebar, main }: LayoutProps) {
   return (
     <div className="h-full flex bg-bg-primary">
       {/* Sidebar */}
-      <aside className="w-72 flex-shrink-0 border-r border-border-default bg-bg-secondary flex flex-col">
+      <aside className="min-w-72 w-fit max-w-md flex-shrink-0 border-r border-border-default bg-bg-secondary flex flex-col">
         {sidebar}
       </aside>
 
