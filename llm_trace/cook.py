@@ -325,6 +325,10 @@ class TraceCooker:
             requests=self.requests,
         )
 
+    # Dependency analysis parameters
+    TOOL_DIFF_PENALTY = 0.5  # Penalty per different tool
+    RELATIVE_THRESHOLD = 0.5  # Edit distance threshold as ratio of message count
+
     def _analyze_dependencies(self) -> None:
         """Analyze request dependencies and set parent_id for each request."""
         for idx, req in enumerate(self.requests):
@@ -341,23 +345,34 @@ class TraceCooker:
             candidates: Requests earlier than curr (sorted by timestamp ascending)
 
         Returns:
-            parent_id or None
+            parent_id or None (becomes new root if no good match)
         """
+        # Filter: only consider candidates with same model
+        same_model_candidates = [c for c in candidates if c.model == curr.model]
+
+        if not same_model_candidates:
+            return None  # No same-model candidate, become new root
+
         # Optimization: check prefix relationship first (from most recent)
-        for c in reversed(candidates):
+        for c in reversed(same_model_candidates):
             expected_prefix = self._build_expected_prefix(c)
             if self._is_prefix(expected_prefix, curr.request_messages):
                 return c.id
 
-        # Fallback: use edit distance to find most similar parent
+        # Fallback: use combined score to find most similar parent
         best_score = float("-inf")
         best_parent_id = None
 
-        for c in reversed(candidates):  # From most recent, same score picks latest
+        for c in reversed(same_model_candidates):  # From most recent, same score picks latest
             score = self._match_score(curr, c)
             if score > best_score:
                 best_score = score
                 best_parent_id = c.id
+
+        # Forest support: become new root if score is too low
+        threshold = -len(curr.request_messages) * self.RELATIVE_THRESHOLD
+        if best_score < threshold:
+            return None
 
         return best_parent_id
 
@@ -379,17 +394,24 @@ class TraceCooker:
         return messages[: len(prefix)] == prefix
 
     def _match_score(self, curr: CookedRequest, candidate: CookedRequest) -> float:
-        """Compute match score using negative edit distance (higher is more similar).
+        """Compute combined match score (higher is more similar).
 
-        Calculates edit operations needed to transform A to B, returns negative.
-        A: candidate.request_messages + [candidate.response_message] (if exists)
-        B: curr.request_messages
+        Score = message_score + tool_score
+        - message_score: negative edit distance
+        - tool_score: penalty for tool differences
         """
+        # Message score: negative edit distance
         a = self._build_expected_prefix(candidate)
         b = curr.request_messages
+        message_score = -self._levenshtein(a, b)
 
-        edit_distance = self._levenshtein(a, b)
-        return -edit_distance
+        # Tool score: penalty for different tools
+        curr_tools = set(curr.tools)
+        candidate_tools = set(candidate.tools)
+        tool_diff = len(curr_tools.symmetric_difference(candidate_tools))
+        tool_score = -self.TOOL_DIFF_PENALTY * tool_diff
+
+        return message_score + tool_score
 
     def _levenshtein(self, a: list[str], b: list[str]) -> int:
         """Compute Levenshtein distance between two lists.

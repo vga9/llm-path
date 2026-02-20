@@ -24,19 +24,57 @@
 
 ## 目标
 
-为每个请求的 `parent_id` 赋值，构建请求间的依赖树。
+为每个请求的 `parent_id` 赋值，构建请求间的**依赖森林**（允许多个根节点）。
 
 ## 算法
 
 ### 核心思路
 
 1. 按时间戳排序，保证 parent 一定出现在当前请求之前
-2. 优先检查前缀关系（精确匹配）
-3. 若无精确匹配，使用编辑距离找最相似的 parent
+2. **过滤候选**：跳过 model 不同的请求（不同模型间无依赖关系）
+3. 优先检查前缀关系（精确匹配）
+4. 若无精确匹配，使用综合得分（消息编辑距离 + 工具相似度）找最相似的 parent
+5. **森林支持**：如果最佳得分低于阈值，则成为新的根节点
+
+### 得分计算
+
+综合得分由两部分组成：
+
+```
+total_score = message_score + tool_score
+
+message_score = -edit_distance(candidate_messages, curr_messages)
+tool_score = -TOOL_DIFF_PENALTY * tool_diff_count
+```
+
+其中：
+- `message_score`：消息编辑距离的负值
+- `tool_score`：工具差异的惩罚，`tool_diff_count` 为工具集合的对称差集大小
+- `TOOL_DIFF_PENALTY`：工具差异惩罚系数（默认 0.5）
+
+### 阈值判断（森林支持）
+
+使用相对阈值判断是否应该成为新根节点：
+
+```python
+# 相对阈值：编辑距离超过当前消息数的一定比例，则成为新根
+RELATIVE_THRESHOLD = 0.5  # 50%
+
+if best_score < -len(curr.request_messages) * RELATIVE_THRESHOLD:
+    return None  # 成为新根节点
+```
+
+这个设计使得：
+- 消息数少时（如 2 条），阈值为 -1，稍有不同就成为新根
+- 消息数多时（如 20 条），阈值为 -10，允许更大的差异
 
 ### 伪代码
 
 ```python
+TOOL_DIFF_PENALTY = 0.5   # 每个不同的 tool 扣 0.5 分
+RELATIVE_THRESHOLD = 0.5  # 编辑距离超过消息数的 50% 则成为新根
+
+
 def find_parent(curr, candidates):
     """
     为当前请求找到最合适的 parent
@@ -46,25 +84,56 @@ def find_parent(curr, candidates):
         candidates: 时间早于 curr 的所有请求（按时间升序）
 
     Returns:
-        parent_id 或 None
+        parent_id 或 None（成为新根节点）
     """
+    # 过滤：只考虑相同 model 的候选
+    same_model_candidates = [c for c in candidates if c.model == curr.model]
+
+    if not same_model_candidates:
+        return None  # 没有相同 model 的候选，成为新根
+
     # 优化：优先检查前缀关系（从最近的开始找）
-    for c in reversed(candidates):
+    for c in reversed(same_model_candidates):
         expected_prefix = build_expected_prefix(c)
         if is_prefix(expected_prefix, curr.request_messages):
             return c.id
 
-    # 回退：使用编辑距离找最相似的 parent
+    # 回退：使用综合得分找最相似的 parent
     best_score = float('-inf')
     best_parent_id = None
 
-    for c in reversed(candidates):  # 从最近的开始，相同得分时选最近的
+    for c in reversed(same_model_candidates):
         score = match_score(curr, c)
         if score > best_score:
             best_score = score
             best_parent_id = c.id
 
+    # 森林支持：得分过低则成为新根节点
+    threshold = -len(curr.request_messages) * RELATIVE_THRESHOLD
+    if best_score < threshold:
+        return None
+
     return best_parent_id
+
+
+def match_score(curr, candidate):
+    """
+    计算综合匹配得分
+
+    得分 = 消息编辑距离得分 + 工具相似度得分
+    """
+    # 消息得分：编辑距离的负值
+    a = build_expected_prefix(candidate)
+    b = curr.request_messages
+    message_score = -levenshtein(a, b)
+
+    # 工具得分：工具差异的惩罚
+    curr_tools = set(curr.tools)
+    candidate_tools = set(candidate.tools)
+    tool_diff = len(curr_tools.symmetric_difference(candidate_tools))
+    tool_score = -TOOL_DIFF_PENALTY * tool_diff
+
+    return message_score + tool_score
 
 
 def build_expected_prefix(candidate):
@@ -85,21 +154,6 @@ def is_prefix(prefix, messages):
     if len(prefix) > len(messages):
         return False
     return messages[:len(prefix)] == prefix
-
-
-def match_score(curr, candidate):
-    """
-    使用编辑距离的负值作为得分（越大越相似）
-
-    计算从 A 转换成 B 需要的编辑操作数，取负值
-    A: candidate.request_messages + [candidate.response_message]（如果存在）
-    B: curr.request_messages
-    """
-    a = build_expected_prefix(candidate)
-    b = curr.request_messages
-
-    edit_distance = levenshtein(a, b)
-    return -edit_distance
 
 
 def levenshtein(a, b):
@@ -149,6 +203,17 @@ def analyze_dependencies(requests):
 | 请求失败（无 response_message） | `build_expected_prefix` 只返回 `request_messages` |
 | 多个候选得分相同 | 选择时间最近的（通过 `reversed` 遍历实现） |
 | 空的 request_messages | 正常处理，编辑距离会计算为对方的长度 |
+| 不同 model | 直接跳过，不考虑作为候选 parent |
+| 没有相同 model 的候选 | 成为新根节点 |
+| 工具集合差异大 | 降低匹配得分，但不直接排除 |
+| 得分低于阈值 | 成为新根节点（森林结构） |
+
+## 参数说明
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `TOOL_DIFF_PENALTY` | 0.5 | 每个不同的工具扣除的分数 |
+| `RELATIVE_THRESHOLD` | 0.5 | 编辑距离超过消息数的该比例时成为新根 |
 
 ## 复杂度
 
