@@ -95,9 +95,7 @@ class LLMProxy:
                     method, url, headers=headers, json=request_data
                 )
             else:
-                response = await self.client.request(
-                    method, url, headers=headers, content=raw_body
-                )
+                response = await self.client.request(method, url, headers=headers, content=raw_body)
 
             duration_ms = int((time.time() - start_time) * 1000)
 
@@ -146,10 +144,8 @@ class LLMProxy:
         logging.info("Record stream LLM Call")
 
         async def generate() -> AsyncIterator[bytes]:
-            chunks: list[str] = []
-            collected_content = ""
-            response_id = None
-            model = None
+            # Collect raw SSE lines for later parsing in cook stage
+            raw_sse_lines: list[str] = []
 
             try:
                 async with self.client.stream(
@@ -159,40 +155,16 @@ class LLMProxy:
                         # Forward raw line to client
                         yield f"{line}\n".encode("utf-8")
 
-                        # Parse SSE data
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                continue
+                        # Collect non-empty lines
+                        if line.strip():
+                            raw_sse_lines.append(line)
 
-                            try:
-                                chunk = json.loads(data)
-                                chunks.append(data)
-
-                                # Extract metadata from first chunk
-                                if response_id is None:
-                                    response_id = chunk.get("id")
-                                    model = chunk.get("model")
-
-                                # Extract content delta
-                                choices = chunk.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    content = delta.get("content", "")
-                                    if content:
-                                        collected_content += content
-
-                            except json.JSONDecodeError:
-                                pass
-
-                # Record the complete response
+                # Record the raw SSE data for parsing in cook stage
                 duration_ms = int((time.time() - start_time) * 1000)
                 record.duration_ms = duration_ms
                 record.response = {
-                    "id": response_id,
-                    "model": model,
-                    "content": collected_content,
                     "stream": True,
+                    "sse_lines": raw_sse_lines,
                 }
                 self.storage.append(record)
 
@@ -202,9 +174,7 @@ class LLMProxy:
                 record.duration_ms = duration_ms
                 self.storage.append(record)
 
-                error_response = json.dumps(
-                    {"error": {"message": str(e), "type": "proxy_error"}}
-                )
+                error_response = json.dumps({"error": {"message": str(e), "type": "proxy_error"}})
                 yield f"data: {error_response}\n".encode("utf-8")
 
         return StreamingResponse(

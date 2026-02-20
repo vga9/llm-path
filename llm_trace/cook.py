@@ -92,6 +92,210 @@ def _map_role(role: str, tool_calls: list[dict] | None) -> str:
     return role
 
 
+def _parse_openai_sse(sse_lines: list[str]) -> dict:
+    """Parse OpenAI SSE lines into a response dict.
+
+    OpenAI format:
+        data: {"id": "xxx", "model": "gpt-4", "choices": [{"delta": {"content": "Hi"}}]}
+        data: [DONE]
+    """
+    response_id = None
+    model = None
+    content_parts = []
+    tool_calls: dict[int, dict] = {}  # index -> {name, arguments}
+
+    for line in sse_lines:
+        if not line.startswith("data: "):
+            continue
+
+        data = line[6:]
+        if data == "[DONE]":
+            continue
+
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+
+        # Extract metadata
+        if response_id is None:
+            response_id = chunk.get("id")
+        if model is None:
+            model = chunk.get("model")
+
+        # Extract content delta
+        choices = chunk.get("choices", [])
+        if not choices:
+            continue
+
+        delta = choices[0].get("delta", {})
+
+        # Text content
+        content = delta.get("content")
+        if content:
+            content_parts.append(content)
+
+        # Tool calls
+        delta_tool_calls = delta.get("tool_calls", [])
+        for tc in delta_tool_calls:
+            idx = tc.get("index", 0)
+            if idx not in tool_calls:
+                tool_calls[idx] = {"id": "", "name": "", "arguments": ""}
+
+            if "id" in tc:
+                tool_calls[idx]["id"] = tc["id"]
+            if "function" in tc:
+                func = tc["function"]
+                if "name" in func:
+                    tool_calls[idx]["name"] = func["name"]
+                if "arguments" in func:
+                    tool_calls[idx]["arguments"] += func["arguments"]
+
+    # Build response in OpenAI format
+    message: dict = {
+        "role": "assistant",
+        "content": "".join(content_parts),
+    }
+
+    if tool_calls:
+        message["tool_calls"] = [
+            {
+                "id": tc["id"],
+                "type": "function",
+                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+            }
+            for tc in sorted(tool_calls.values(), key=lambda x: x.get("id", ""))
+        ]
+
+    return {
+        "id": response_id,
+        "model": model,
+        "choices": [{"message": message}],
+    }
+
+
+def _parse_claude_sse(sse_lines: list[str]) -> dict:
+    """Parse Claude SSE lines into a response dict.
+
+    Claude format:
+        event: message_start
+        data: {"type": "message_start", "message": {"id": "xxx", "model": "..."}}
+
+        event: content_block_delta
+        data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hi"}}
+
+        event: message_stop
+        data: {"type": "message_stop"}
+    """
+    response_id = None
+    model = None
+    content_blocks: dict[int, dict] = {}  # index -> {type, text/name/input}
+    stop_reason = None
+
+    for line in sse_lines:
+        if not line.startswith("data: "):
+            continue
+
+        data = line[6:]
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+
+        event_type = chunk.get("type", "")
+
+        if event_type == "message_start":
+            message = chunk.get("message", {})
+            response_id = message.get("id")
+            model = message.get("model")
+
+        elif event_type == "content_block_start":
+            index = chunk.get("index", 0)
+            block = chunk.get("content_block", {})
+            block_type = block.get("type", "text")
+            content_blocks[index] = {
+                "type": block_type,
+                "text": block.get("text", ""),
+                "name": block.get("name", ""),
+                "input": "",  # Will be accumulated
+            }
+
+        elif event_type == "content_block_delta":
+            index = chunk.get("index", 0)
+            delta = chunk.get("delta", {})
+            delta_type = delta.get("type", "")
+
+            if index not in content_blocks:
+                content_blocks[index] = {"type": "text", "text": "", "name": "", "input": ""}
+
+            if delta_type == "text_delta":
+                content_blocks[index]["text"] += delta.get("text", "")
+            elif delta_type == "thinking_delta":
+                content_blocks[index]["text"] += delta.get("thinking", "")
+            elif delta_type == "input_json_delta":
+                content_blocks[index]["input"] += delta.get("partial_json", "")
+
+        elif event_type == "message_delta":
+            delta = chunk.get("delta", {})
+            stop_reason = delta.get("stop_reason")
+
+    # Build response in Claude format
+    content = []
+    for idx in sorted(content_blocks.keys()):
+        block = content_blocks[idx]
+        block_type = block["type"]
+
+        if block_type == "text":
+            content.append({"type": "text", "text": block["text"]})
+        elif block_type == "thinking":
+            content.append({"type": "thinking", "thinking": block["text"]})
+        elif block_type == "tool_use":
+            input_data = {}
+            if block["input"]:
+                try:
+                    input_data = json.loads(block["input"])
+                except json.JSONDecodeError:
+                    input_data = {"raw": block["input"]}
+            content.append(
+                {
+                    "type": "tool_use",
+                    "name": block["name"],
+                    "input": input_data,
+                }
+            )
+
+    return {
+        "id": response_id,
+        "model": model,
+        "content": content,
+        "stop_reason": stop_reason,
+    }
+
+
+def _is_claude_sse(sse_lines: list[str]) -> bool:
+    """Detect if SSE lines are in Claude format."""
+    for line in sse_lines:
+        if line.startswith("data: "):
+            data = line[6:]
+            try:
+                chunk = json.loads(data)
+                # Claude events have a "type" field
+                if "type" in chunk and chunk["type"] in (
+                    "message_start",
+                    "content_block_start",
+                    "content_block_delta",
+                    "message_delta",
+                    "message_stop",
+                ):
+                    return True
+                # OpenAI events have "choices" field
+                if "choices" in chunk:
+                    return False
+            except json.JSONDecodeError:
+                continue
+    return False
+
+
 def _parse_tool_calls(tool_calls: list[dict] | None) -> list[dict] | None:
     """Parse tool_calls, flattening to {name, arguments} format for frontend."""
     if not tool_calls:
@@ -133,6 +337,13 @@ def _iso_to_unix_ms(iso_str: str) -> int:
 def _detect_api_format(record: dict) -> str:
     """Detect whether record is Claude or OpenAI format."""
     request = record.get("request", {})
+    response = record.get("response", {})
+
+    # Check streaming response SSE format
+    if response and response.get("stream") and "sse_lines" in response:
+        if _is_claude_sse(response["sse_lines"]):
+            return "claude"
+        return "openai"
 
     # Claude indicators: system field is a list of blocks
     if "system" in request and isinstance(request.get("system"), list):
@@ -273,6 +484,11 @@ class TraceCooker:
 
         if not response:
             return self._get_or_create_message("assistant", "", None)
+
+        # Handle streaming response - parse SSE lines first
+        if response.get("stream") and "sse_lines" in response:
+            sse_lines = response["sse_lines"]
+            response = _parse_openai_sse(sse_lines)
 
         choices = response.get("choices", [])
         if not choices:
@@ -437,6 +653,11 @@ class TraceCooker:
 
         if not response:
             return self._get_or_create_message("assistant", "", None)
+
+        # Handle streaming response - parse SSE lines first
+        if response.get("stream") and "sse_lines" in response:
+            sse_lines = response["sse_lines"]
+            response = _parse_claude_sse(sse_lines)
 
         content = response.get("content", [])
         if not content:
