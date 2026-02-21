@@ -387,7 +387,7 @@ The `cook` command transforms traces into a deduplicated, visualization-ready fo
 }
 ```
 
-Note: `response_messages` is an array to support multiple response parts (e.g., thinking + assistant message).
+Note: `response_messages` is an array to support multiple response parts. Text content and tool calls are split into separate messages (consistent with request handling), enabling accurate diff calculation between consecutive requests. Example parts: thinking message, text message, tool_use message.
 
 ---
 

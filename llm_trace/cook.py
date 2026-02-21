@@ -527,7 +527,16 @@ class TraceCooker:
         content = message.get("content", "")
         tool_calls = message.get("tool_calls")
 
-        return [self._get_or_create_message(role, content, tool_calls)]
+        # Split content and tool_calls into separate messages (consistent with request handling)
+        msg_ids = []
+        if content:
+            msg_ids.append(self._get_or_create_message(role, content, None))
+        if tool_calls:
+            msg_ids.append(self._get_or_create_message(role, "", tool_calls))
+        # If neither content nor tool_calls, create empty assistant message
+        if not msg_ids:
+            msg_ids.append(self._get_or_create_message(role, "", None))
+        return msg_ids
 
     def _process_tools(self, tools: list[dict] | None) -> list[str]:
         """Process tool definitions and return list of tool IDs."""
@@ -718,15 +727,16 @@ class TraceCooker:
                     tool_call["id"] = block["id"]
                 tool_calls.append(tool_call)
 
-        # Create assistant message for text/tool_calls
+        # Split text and tool_calls into separate messages (consistent with request handling)
         combined_text = "".join(text_parts).strip()
-        if combined_text or tool_calls:
-            msg_id = self._get_or_create_message(
-                "assistant", combined_text, tool_calls if tool_calls else None
-            )
+        if combined_text:
+            msg_id = self._get_or_create_message("assistant", combined_text, None)
             msg_ids.append(msg_id)
-        elif not msg_ids:
-            # No content at all - create empty assistant message
+        if tool_calls:
+            msg_id = self._get_or_create_message("assistant", "", tool_calls)
+            msg_ids.append(msg_id)
+        # If no content at all (no text, tool_calls, or thinking), create empty assistant message
+        if not msg_ids:
             msg_ids.append(self._get_or_create_message("assistant", "", None))
 
         return msg_ids
