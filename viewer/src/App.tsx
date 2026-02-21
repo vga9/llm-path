@@ -41,9 +41,32 @@ function App() {
         e.preventDefault();
         const prevIndex = Math.max(currentIndex - 1, 0);
         setSelectedRequestId(sortedRequestIds[prevIndex]);
+      } else if (e.key === ' ' && data) {
+        // Space: navigate to first child node (leftmost branch = largest subtree)
+        e.preventDefault();
+        const children = data.requests.filter((r) => r.parent_id === selectedRequestId);
+        if (children.length > 0) {
+          // Build children map for subtree size calculation
+          const childrenMap = new Map<string, string[]>();
+          for (const r of data.requests) {
+            if (r.parent_id) {
+              const siblings = childrenMap.get(r.parent_id) || [];
+              siblings.push(r.id);
+              childrenMap.set(r.parent_id, siblings);
+            }
+          }
+          // Calculate subtree size recursively
+          const getSubtreeSize = (id: string): number => {
+            const kids = childrenMap.get(id) || [];
+            return 1 + kids.reduce((sum, kid) => sum + getSubtreeSize(kid), 0);
+          };
+          // Sort by subtree size descending, pick largest (leftmost branch)
+          children.sort((a, b) => getSubtreeSize(b.id) - getSubtreeSize(a.id));
+          setSelectedRequestId(children[0].id);
+        }
       }
     },
-    [sortedRequestIds, selectedRequestId],
+    [sortedRequestIds, selectedRequestId, data],
   );
 
   useEffect(() => {
