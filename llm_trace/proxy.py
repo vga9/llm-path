@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
@@ -54,8 +55,14 @@ class LLMProxy:
         # Build headers for upstream request (forward most headers)
         headers = {}
         for key, value in request.headers.items():
-            # Skip hop-by-hop headers
-            if key.lower() not in ("host", "connection", "keep-alive", "transfer-encoding"):
+            # Skip hop-by-hop headers and accept-encoding (httpx auto-decompresses)
+            if key.lower() not in (
+                "host",
+                "connection",
+                "keep-alive",
+                "transfer-encoding",
+                "accept-encoding",
+            ):
                 headers[key] = value
 
         # Determine if streaming (only for JSON requests with stream=true)
@@ -105,18 +112,17 @@ class LLMProxy:
                 if record:
                     record.response = response_data
                     record.duration_ms = duration_ms
-                    self.storage.append(record)
+                    await run_in_threadpool(self.storage.append, record)
                 return JSONResponse(response_data, status_code=response.status_code)
             except json.JSONDecodeError:
                 # Return raw response
                 if record:
-                    record.response = {"raw": response.text}
+                    record.response = {"raw": response.content.decode(errors="replace")}
                     record.duration_ms = duration_ms
-                    self.storage.append(record)
+                    await run_in_threadpool(self.storage.append, record)
                 return Response(
                     content=response.content,
                     status_code=response.status_code,
-                    headers=dict(response.headers),
                 )
 
         except httpx.RequestError as e:
@@ -124,7 +130,7 @@ class LLMProxy:
             if record:
                 record.error = str(e)
                 record.duration_ms = duration_ms
-                self.storage.append(record)
+                await run_in_threadpool(self.storage.append, record)
 
             return JSONResponse(
                 {"error": {"message": str(e), "type": "proxy_error"}},
@@ -166,16 +172,16 @@ class LLMProxy:
                     "stream": True,
                     "sse_lines": raw_sse_lines,
                 }
-                self.storage.append(record)
+                await run_in_threadpool(self.storage.append, record)
 
             except httpx.RequestError as e:
                 duration_ms = int((time.time() - start_time) * 1000)
                 record.error = str(e)
                 record.duration_ms = duration_ms
-                self.storage.append(record)
+                await run_in_threadpool(self.storage.append, record)
 
                 error_response = json.dumps({"error": {"message": str(e), "type": "proxy_error"}})
-                yield f"data: {error_response}\n".encode("utf-8")
+                yield f"data: {error_response}\n\n".encode("utf-8")
 
         return StreamingResponse(
             generate(),
@@ -199,6 +205,7 @@ def create_app(target_url: str, storage: JSONLStorage) -> Starlette:
 
     async def on_shutdown():
         await proxy.close()
+        storage.close()
 
     app = Starlette(
         routes=[

@@ -1,7 +1,6 @@
 """Storage layer for trace records."""
 
 import json
-import threading
 from pathlib import Path
 
 from .models import TraceRecord
@@ -12,16 +11,21 @@ class JSONLStorage:
 
     def __init__(self, filepath: str | Path):
         self.filepath = Path(filepath)
-        self._lock = threading.Lock()
         # Ensure parent directory exists
         self.filepath.parent.mkdir(parents=True, exist_ok=True)
+        # Open file once in append mode
+        self._file = open(self.filepath, "a", encoding="utf-8")
 
     def append(self, record: TraceRecord) -> None:
         """Append a trace record to the JSONL file."""
-        with self._lock:
-            with open(self.filepath, "a", encoding="utf-8") as f:
-                json.dump(record.to_dict(), f, ensure_ascii=False)
-                f.write("\n")
+        json.dump(record.to_dict(), self._file, ensure_ascii=False)
+        self._file.write("\n")
+        self._file.flush()
+
+    def close(self) -> None:
+        """Close the file handle."""
+        if self._file and not self._file.closed:
+            self._file.close()
 
     def read_all(self) -> list[TraceRecord]:
         """Read all records from the JSONL file."""
