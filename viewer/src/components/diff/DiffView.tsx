@@ -1,7 +1,6 @@
 import type { DiffResult, Message } from '../../types';
 import { AddedMessage } from './AddedMessage';
 import { DeletedMessage } from './DeletedMessage';
-import { ModifiedMessage } from './ModifiedMessage';
 import { UnchangedGroup } from './UnchangedGroup';
 
 interface DiffViewProps {
@@ -68,11 +67,6 @@ export function DiffView({ diff, expandedMessageId, onToggleExpand }: DiffViewPr
             -{diff.summary.deleted} deleted
           </span>
         )}
-        {diff.summary.modified > 0 && (
-          <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 rounded">
-            ~{diff.summary.modified} modified
-          </span>
-        )}
         {diff.summary.unchanged > 0 && (
           <span className="px-2 py-0.5 bg-bg-tertiary text-text-muted rounded">
             {diff.summary.unchanged} unchanged
@@ -98,7 +92,7 @@ export function DiffView({ diff, expandedMessageId, onToggleExpand }: DiffViewPr
           );
         }
 
-        // Single item (added, deleted, or modified)
+        // Single item (added or deleted)
         const item = group.items[0];
 
         if (item.type === 'added' && item.newMessage) {
@@ -119,18 +113,6 @@ export function DiffView({ diff, expandedMessageId, onToggleExpand }: DiffViewPr
               message={item.oldMessage}
               isExpanded={expandedMessageId === item.oldMessage.id}
               onToggleExpand={() => onToggleExpand(item.oldMessage!.id)}
-            />
-          );
-        }
-
-        if (item.type === 'modified' && item.oldMessage && item.newMessage) {
-          return (
-            <ModifiedMessage
-              key={`modified-${groupIdx}-${item.oldMessage.id}-${item.newMessage.id}`}
-              oldMessage={item.oldMessage}
-              newMessage={item.newMessage}
-              expandedId={expandedMessageId}
-              onToggleExpand={onToggleExpand}
             />
           );
         }

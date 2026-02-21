@@ -38,12 +38,12 @@ export interface TraceData {
 }
 
 export interface DiffItem {
-  type: 'unchanged' | 'added' | 'deleted' | 'modified';
-  oldMessage?: Message;  // unchanged/deleted/modified
-  newMessage?: Message;  // unchanged/added/modified
+  type: 'unchanged' | 'added' | 'deleted';
+  oldMessage?: Message;  // unchanged/deleted
+  newMessage?: Message;  // unchanged/added
 }
 
 export interface DiffResult {
   items: DiffItem[];
-  summary: { unchanged: number; added: number; deleted: number; modified: number };
+  summary: { unchanged: number; added: number; deleted: number };
 }
