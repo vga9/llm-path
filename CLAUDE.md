@@ -20,6 +20,9 @@ uv run ruff format llm_trace/
 
 # Run viewer (React)
 cd viewer && npm install && npm run dev
+
+# load data from custom path
+open http://localhost:port/?data=path/to/other.json
 ```
 
 ## Directory Structure
@@ -95,11 +98,11 @@ Output structure:
 {"messages": [...], "tools": [...], "requests": [...]}
 ```
 
-See `docs/req-dependency.md` for algorithm details.
+See `docs/request-dependency.md` for algorithm details.
 
 ## Viewer Features
 
-- **Request graph**: Visual tree/forest of request dependencies in sidebar
+- **Request graph**: Visual tree/forest of request dependencies in sidebar. See `docs/request-graph-implementation.md` for implementation details.
 - **Message diff view**: Compare messages between consecutive requests
 - **Dark/light theme**: Toggle via ThemeProvider
 - **Collapsible content**: Messages and tool descriptions collapse for readability
