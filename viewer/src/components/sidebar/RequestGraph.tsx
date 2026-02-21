@@ -22,6 +22,21 @@ interface FlatNode {
 
 // ─── Column Assignment (git-style) ────────────────────────────────────────────
 
+// Cache for subtree sizes to avoid recomputation
+const subtreeSizeCache = new Map<string, number>();
+
+function getSubtreeSize(node: RequestTreeNode): number {
+  const cached = subtreeSizeCache.get(node.request.id);
+  if (cached !== undefined) return cached;
+
+  let size = 1; // Current node
+  for (const child of node.children) {
+    size += getSubtreeSize(child);
+  }
+  subtreeSizeCache.set(node.request.id, size);
+  return size;
+}
+
 function assignCols(
   node: RequestTreeNode,
   col: number,
@@ -40,7 +55,12 @@ function assignCols(
   });
 
   if (node.children.length > 0) {
-    node.children.forEach((child, i) => {
+    // Sort children by subtree size (descending) - largest subtree keeps original column
+    const sortedChildren = [...node.children].sort(
+      (a, b) => getSubtreeSize(b) - getSubtreeSize(a),
+    );
+
+    sortedChildren.forEach((child, i) => {
       if (i === 0) {
         assignCols(child, col, false, counter, node.request.id, out);
       } else {
@@ -53,6 +73,9 @@ function assignCols(
 
 function buildFlatNodes(roots: RequestTreeNode[]): FlatNode[] {
   const out: FlatNode[] = [];
+
+  // Clear subtree size cache for fresh computation
+  subtreeSizeCache.clear();
 
   // Separate single-node trees (roots with no children) from multi-node trees
   const singleNodeRoots = roots.filter((root) => root.children.length === 0);
