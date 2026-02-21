@@ -725,7 +725,7 @@ class TraceCooker:
                 tool_calls.append(tool_call)
 
         # Split text and tool_calls into separate messages (consistent with request handling)
-        combined_text = "".join(text_parts).strip()
+        combined_text = "".join(text_parts)
         if combined_text:
             msg_id = self._get_or_create_message("assistant", combined_text, None)
             msg_ids.append(msg_id)
